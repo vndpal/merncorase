@@ -1,22 +1,23 @@
 function fibo(num)
 {
-    if(num===0)
+    if(num===1)
     {
         return 0;
     }
-   let current = 0;
-   let prev = 0;
-    for(i=0;i<=num;i++)
+    if(num===2)
     {
-       
-       prev = current;
-       current = current + prev;
-       if(current===0)
-       {
-           current++;
-       }
+        return 1;
     }
-   return current;
+   let current = 1;
+   let prev = 0;
+   let res = 0;
+    for(i=2;i<=num;i++)
+    {
+       res = prev+current;
+       prev = current;
+       current = res;
+    }
+   return res;
 }
 
-console.log(fibo(2));
+console.log(fibo(7));
