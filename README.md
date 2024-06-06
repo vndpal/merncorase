@@ -1,16 +1,28 @@
-To change the header color of a `DialogWindow` in Visual Studio based on the theme, you'll need to extend the `DialogWindow` and customize the header template. Here’s how you can achieve this:
+If you prefer a different approach to changing the header color of a `DialogWindow` based on the Visual Studio theme, you can achieve it by handling the theme change event and dynamically updating the header color. Here's how you can do it:
 
-### Step 1: Create a Theme Helper
+### Step 1: Add Necessary References
+Ensure you have the required references in your project:
 
-First, ensure you have a helper class to detect the current Visual Studio theme:
+- `Microsoft.VisualStudio.Shell.15.0`
+- `Microsoft.VisualStudio.Shell.Interop.15.0`
+- `Microsoft.VisualStudio.PlatformUI`
+
+### Step 2: Create the Theme Helper
+
+Create a helper class to detect the current theme and subscribe to theme change events:
 
 ```csharp
 using Microsoft.VisualStudio.Shell;
 using Microsoft.VisualStudio.Shell.Interop;
 using System;
+using System.Runtime.InteropServices;
 
 public static class ThemeHelper
 {
+    private static readonly Guid DarkThemeGuid = new Guid("1ded0138-47ce-435e-84ef-9ec1f439b749");
+
+    public static event Action ThemeChanged;
+
     public static bool IsDarkTheme()
     {
         var shell = (IVsUIShell5)ServiceProvider.GlobalProvider.GetService(typeof(SVsUIShell));
@@ -19,20 +31,37 @@ public static class ThemeHelper
             throw new InvalidOperationException("Cannot get SVsUIShell service.");
         }
 
-        Guid themeId;
         shell.GetVSSysColorEx((int)__VSSYSCOLOREX3.VSCOLOR_THEMEID, out object value);
-        themeId = (Guid)value;
+        Guid themeId = (Guid)value;
+        return themeId == DarkThemeGuid;
+    }
 
-        // Dark theme GUID, adjust if necessary
-        Guid darkThemeId = new Guid("1ded0138-47ce-435e-84ef-9ec1f439b749");
-        return themeId == darkThemeId;
+    public static void Initialize()
+    {
+        var shell = (IVsUIShell5)ServiceProvider.GlobalProvider.GetService(typeof(SVsUIShell));
+        if (shell != null)
+        {
+            shell.AdviseBroadcastMessages(new ThemeBroadcastMessages(), out _);
+        }
+    }
+
+    private class ThemeBroadcastMessages : IVsBroadcastMessageEvents
+    {
+        public int OnBroadcastMessage(uint msg, IntPtr wParam, IntPtr lParam)
+        {
+            if (msg == 0x031A) // WM_THEMECHANGED
+            {
+                ThemeChanged?.Invoke();
+            }
+            return VSConstants.S_OK;
+        }
     }
 }
 ```
 
-### Step 2: Create a Custom `DialogWindow`
+### Step 3: Create the Custom Dialog Window
 
-Extend the `DialogWindow` class and apply the theme-specific header color:
+Create a custom `DialogWindow` class that subscribes to theme changes and updates the header color dynamically:
 
 ```csharp
 using Microsoft.VisualStudio.PlatformUI;
@@ -47,18 +76,17 @@ namespace MyExtension
         {
             InitializeComponent();
             ApplyThemeColors();
+            ThemeHelper.ThemeChanged += OnThemeChanged;
         }
 
         private void ApplyThemeColors()
         {
-            if (ThemeHelper.IsDarkTheme())
-            {
-                HeaderBackground = new SolidColorBrush(Colors.Black);
-            }
-            else
-            {
-                HeaderBackground = new SolidColorBrush(Colors.White);
-            }
+            HeaderBackground = ThemeHelper.IsDarkTheme() ? new SolidColorBrush(Colors.Black) : new SolidColorBrush(Colors.White);
+        }
+
+        private void OnThemeChanged()
+        {
+            Dispatcher.Invoke(ApplyThemeColors);
         }
 
         public Brush HeaderBackground
@@ -69,13 +97,19 @@ namespace MyExtension
 
         public static readonly DependencyProperty HeaderBackgroundProperty =
             DependencyProperty.Register("HeaderBackground", typeof(Brush), typeof(MyDialogWindow), new PropertyMetadata(Brushes.White));
+
+        protected override void OnClosed(EventArgs e)
+        {
+            base.OnClosed(e);
+            ThemeHelper.ThemeChanged -= OnThemeChanged;
+        }
     }
 }
 ```
 
-### Step 3: Define the Custom Header Template in XAML
+### Step 4: Define the Custom Header in XAML
 
-Create a custom template for the `DialogWindow` header in your XAML:
+Customize the header of your `DialogWindow` in XAML to bind to the `HeaderBackground` property:
 
 ```xml
 <platform:DialogWindow x:Class="MyExtension.MyDialogWindow"
@@ -91,7 +125,7 @@ Create a custom template for the `DialogWindow` header in your XAML:
                         <Border BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}">
                             <DockPanel>
                                 <!-- Header -->
-                                <Border Background="{Binding HeaderBackground, RelativeSource={RelativeSource AncestorType=platform:DialogWindow}}">
+                                <Border Background="{Binding HeaderBackground, RelativeSource={RelativeSource TemplatedParent}}">
                                     <DockPanel>
                                         <ContentPresenter Content="{TemplateBinding Title}" HorizontalAlignment="Center" VerticalAlignment="Center" />
                                     </DockPanel>
@@ -111,10 +145,10 @@ Create a custom template for the `DialogWindow` header in your XAML:
 </platform:DialogWindow>
 ```
 
-### Explanation
+### Final Steps
 
-1. **ThemeHelper**: Detects the current Visual Studio theme.
-2. **MyDialogWindow Class**: Extends `DialogWindow` and uses a dependency property `HeaderBackground` to store the header background brush.
-3. **XAML Template**: Defines a custom template for the `DialogWindow`, with a `Border` in the header whose `Background` is bound to the `HeaderBackground` property of the `DialogWindow`.
+1. **Initialize ThemeHelper**: Ensure `ThemeHelper.Initialize()` is called when your extension starts. This can be done in the `Package` class of your extension.
+   
+2. **Handle Theme Changes**: The `MyDialogWindow` class now subscribes to theme changes and updates the header color accordingly.
 
-This setup ensures that the header color changes based on the current Visual Studio theme. Adjust the GUID for the dark theme as necessary to match the actual GUID used by Visual Studio for its dark theme.
+This approach ensures that the header color of your `DialogWindow` updates dynamically when the Visual Studio theme changes, providing a more responsive and integrated user experience.
